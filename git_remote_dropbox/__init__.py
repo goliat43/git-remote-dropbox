@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (c) 2015-2017 Anish Athalye (me@anishathalye.com)
+# Copyright (c) 2015-2018 Anish Athalye (me@anishathalye.com)
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,7 @@ except ImportError:
     from urlparse import urlparse
 
 
-__version__ = '1.0.1'
+__version__ = '1.0.5'
 
 
 CONFIG_FILE = '~/.git-remote-dropbox.json'
@@ -481,8 +481,8 @@ class Helper(object):
             total = len(objects)
             self._trace('', level=Level.INFO, exact=True)
             for done, _ in enumerate(res, 1):
-                pct = float(done) / total
-                message = '\rWriting objects: {:4.0%} ({}/{})'.format(pct, done, total)
+                pct = int(float(done) / total * 100)
+                message = '\rWriting objects: {:3.0f}% ({}/{})'.format(pct, done, total)
                 if done == total:
                     message = '%s, done.\n' % message
                 self._trace(message, level=Level.INFO, exact=True)
@@ -531,6 +531,13 @@ class Helper(object):
         self._trace('fetching: %s' % path)
         meta, resp = self._connection().files_download(path)
         return (meta.rev, resp.content)
+
+    def _get_files(self, paths):
+        """
+        Return a list of (revision number, content) for a given list of files.
+        """
+        pool = multiprocessing.dummy.Pool(self._processes)
+        return pool.map(self._get_file, paths)
 
     def _put_object(self, sha):
         """
@@ -620,8 +627,8 @@ class Helper(object):
                 # show progress
                 done = len(downloaded)
                 total = done + len(pending)
-                pct = float(done) / total
-                message = '\rReceiving objects: {:4.0%} ({}/{})'.format(pct, done, total)
+                pct = int(float(done) / total * 100)
+                message = '\rReceiving objects: {:3.0f}% ({}/{})'.format(pct, done, total)
                 self._trace(message, level=Level.INFO, exact=True)
         self._trace('\rReceiving objects: 100% ({}/{}), done.\n'.format(done, total),
                     level=Level.INFO, exact=True)
@@ -645,9 +652,11 @@ class Helper(object):
             info = self._refs.get(dst, None)
             if info:
                 rev, sha = info
+                if not git_object_exists(sha):
+                    return 'fetch first'
                 is_fast_forward = git_is_ancestor(sha, new_sha)
                 if not is_fast_forward and not force:
-                    return 'non-fast-forward'
+                    return 'non-fast forward'
                 # perform an atomic compare-and-swap
                 mode = dropbox.files.WriteMode.update(rev)
             else:
@@ -686,13 +695,12 @@ class Helper(object):
             else:
                 self._first_push = True
             return []
+        files = [i for i in files if isinstance(i, dropbox.files.FileMetadata)]
+        paths = [i.path_lower for i in files]
+        revs, data = zip(*self._get_files(paths))
         refs = []
-        for ref_file in files:
-            if not isinstance(ref_file, dropbox.files.FileMetadata):
-                continue
-            path = ref_file.path_lower
+        for path, rev, data in zip(paths, revs, data):
             name = self._ref_name_from_path(path)
-            rev, data = self._get_file(path)
             sha = data.decode('utf8').strip()
             self._refs[name] = (rev, sha)
             refs.append('%s %s' % (sha, name))
