@@ -452,7 +452,10 @@ class Helper(object):
         """
         self._trace('deleting ref %s' % ref)
         try:
-            self._connection().files_delete(self._ref_path(ref))
+            if ref == git_symbolic_ref('HEAD'):
+                self._fatal('Deletion of the current remote branch prohibited. Change current branch on remote by editing the HEAD file in Dropbox!')
+            else:
+                self._connection().files_delete(self._ref_path(ref))
         except dropbox.exceptions.ApiError as e:
             if not isinstance(e.error, dropbox.files.DeleteError):
                 raise
